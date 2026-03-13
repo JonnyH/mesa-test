@@ -328,10 +328,19 @@ radv_init_rt_stage_hashes(const struct radv_device *device, VkPipelineCreateFlag
 }
 
 static bool
-should_move_rt_instruction(nir_intrinsic_instr *instr)
+should_move_rt_instruction(nir_intrinsic_instr *instr, mesa_shader_stage stage)
 {
    switch (instr->intrinsic) {
    case nir_intrinsic_load_hit_attrib_amd:
+      /* Don't move load_hit_attrib_amd in intersection shaders (combined
+       * intersection+any-hit functions), because the intersection shader's
+       * store_hit_attrib_amd must execute before the inlined any-hit's
+       * load_hit_attrib_amd. Moving the loads to the top of the function
+       * places them before the stores, causing the any-hit to read stale
+       * (initial) values instead of the intersection's output.
+       */
+      if (stage == MESA_SHADER_INTERSECTION)
+         return false;
       return nir_intrinsic_base(instr) < RADV_MAX_HIT_ATTRIB_DWORDS;
    case nir_intrinsic_load_ray_flags:
    case nir_intrinsic_load_ray_object_origin:
@@ -359,7 +368,7 @@ move_rt_instructions(nir_shader *shader)
 
          nir_intrinsic_instr *intrinsic = nir_instr_as_intrinsic(instr);
 
-         if (!should_move_rt_instruction(intrinsic))
+         if (!should_move_rt_instruction(intrinsic, shader->info.stage))
             continue;
 
          progress = true;
